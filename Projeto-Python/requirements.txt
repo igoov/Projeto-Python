@@ -1,0 +1,15 @@
+# Transcrição de áudio (Local)
+openai-whisper>=20231117
+
+# Processamento de vídeo e áudio
+moviepy>=1.0.3
+ffmpeg-python>=0.2.0
+pydub>=0.25.1
+
+# Computação científica
+numpy>=1.24.0
+scipy>=1.10.0
+
+# IA e Configurações (Google Gemini)
+google-generativeai
+python-dotenv

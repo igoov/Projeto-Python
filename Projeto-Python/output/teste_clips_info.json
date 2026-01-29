@@ -1,0 +1,70 @@
+{
+  "video_source": "teste.mp4",
+  "video_name": "teste",
+  "clips_generated": 0,
+  "subtitle_style": "word",
+  "moments": [
+    {
+      "timestamp": 2.46,
+      "score": 2.4,
+      "types": [
+        "strong_phrase",
+        "strong_phrase",
+        "strong_phrase",
+        "strong_phrase"
+      ],
+      "duration": 50,
+      "type": "heuristic_selected",
+      "reason": "Detectado: strong_phrase"
+    },
+    {
+      "timestamp": 864.04,
+      "score": 2.4,
+      "types": [
+        "strong_phrase",
+        "strong_phrase",
+        "strong_phrase"
+      ],
+      "duration": 50,
+      "type": "heuristic_selected",
+      "reason": "Detectado: strong_phrase"
+    },
+    {
+      "timestamp": 42.28,
+      "score": 2.2,
+      "types": [
+        "strong_phrase",
+        "strong_phrase",
+        "strong_phrase"
+      ],
+      "duration": 50,
+      "type": "heuristic_selected",
+      "reason": "Detectado: strong_phrase"
+    },
+    {
+      "timestamp": 563.8199999999999,
+      "score": 2.0,
+      "types": [
+        "strong_phrase",
+        "pause",
+        "pause"
+      ],
+      "duration": 50,
+      "type": "heuristic_selected",
+      "reason": "Detectado: strong_phrase, pause"
+    },
+    {
+      "timestamp": 8.86,
+      "score": 1.7999999999999998,
+      "types": [
+        "strong_phrase",
+        "strong_phrase",
+        "strong_phrase"
+      ],
+      "duration": 50,
+      "type": "heuristic_selected",
+      "reason": "Detectado: strong_phrase"
+    }
+  ],
+  "clips": []
+}
