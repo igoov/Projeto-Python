@@ -1,0 +1,9 @@
+# Remove tudo do índice (não apaga do seu PC, só do Git)
+git rm -r --cached .
+
+# Adiciona tudo de novo (agora ele vai respeitar o .gitignore novo)
+git add .
+
+# Grava a mudança
+git commit -m "Fix: removendo chaves e arquivos pesados do histórico"
+
