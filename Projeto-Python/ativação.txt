@@ -1,3 +1,28 @@
+-----------------------------
+Codigos para rodar: 
+
+cd Projeto-Python
+
 source .venv/bin/activate
 
 python podcast_clipper.py teste.mp4 --no-llm 
+
+-----------------------------
+
+Caso nao tiver com o venv na pasta: 
+
+python3 -m venv .venv -> pra criar a pasta venv
+
+python3 -m pip install python-dotenv google-generativeai moviepy openai-whisper pydub audioop-lts -> para isntalar o modulo do py
+
+-----------------------------
+
+Caso de algum problema: 
+
+rm -rf .venv -> deletar a pasta problematica
+
+-------------------------------
+
+instalar a biblioteca para analisar os rostos: 
+
+pip install opencv-python

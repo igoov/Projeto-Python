@@ -1,5 +1,5 @@
 """
-Módulo para detecção de momentos interessantes em podcasts - Versão com Chave Configurada
+Módulo para detecção de momentos interessantes em podcasts
 """
 import numpy as np
 from pydub import AudioSegment
@@ -11,16 +11,19 @@ import os
 class MomentDetector:
     def __init__(self, use_llm=True):
         """
-        Inicializa o detector de momentos interessantes usando Gemini
+        Inicializa o detector de momentos interessantes
         """
         self.use_llm = use_llm
         if use_llm:
-            # Chave configurada diretamente conforme solicitado
+            # CHAVE CONFIGURADA DIRETAMENTE CONFORME SOLICITADO
             api_key = "AIzaSyCqfteZkSbcd6lO_ePiOq5RqXqiYzqzD-A"
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel('gemini-1.5-flash')
     
     def analyze_audio_energy(self, audio_path):
+        """
+        Analisa a energia do áudio para encontrar picos de volume
+        """
         print("Analisando energia do áudio...")
         audio = AudioSegment.from_wav(audio_path)
         nonsilent_ranges = detect_nonsilent(audio, min_silence_len=500, silence_thresh=audio.dBFS - 16)
@@ -37,6 +40,9 @@ class MomentDetector:
         return high_energy_moments
     
     def detect_laughter_pauses(self, segments):
+        """
+        Detecta risadas e pausas significativas na transcrição
+        """
         print("Detectando risadas e pausas...")
         laughter_moments = []
         for i, segment in enumerate(segments):
@@ -54,6 +60,9 @@ class MomentDetector:
         return laughter_moments
     
     def analyze_text_content(self, segments):
+        """
+        Analisa o conteúdo textual em busca de frases fortes e palavras-chave
+        """
         print("Analisando conteúdo textual...")
         strong_moments = []
         keywords = ['incrível', 'impressionante', 'surpreendente', 'chocante', 'nunca', 'sempre', 'jamais', 'segredo', 'verdade', 'mentira', 'descobri', 'revelação', 'importante', 'fundamental', 'essencial', 'crucial', 'problema', 'solução', 'dica', 'truque', 'hack']
@@ -75,6 +84,9 @@ class MomentDetector:
         return strong_moments
     
     def llm_analyze_segments(self, segments, max_clips=5):
+        """
+        Usa LLM para analisar o contexto e selecionar os melhores momentos
+        """
         if not self.use_llm: return []
         print("Analisando conteúdo com Gemini...")
         full_text = ""
@@ -112,8 +124,13 @@ class MomentDetector:
             return []
     
     def find_best_moments(self, transcription, audio_path, max_clips=5):
+        """
+        Combina todas as técnicas para encontrar os melhores momentos
+        """
         segments = transcription['segments']
         all_moments = []
+        
+        # Coleta momentos de diferentes fontes
         try:
             all_moments.extend(self.analyze_audio_energy(audio_path))
         except: pass
@@ -124,6 +141,7 @@ class MomentDetector:
             all_moments.extend(self.analyze_text_content(segments))
         except: pass
         
+        # Se LLM estiver ativa, ela tem prioridade ou serve como filtro final
         llm_moments = []
         if self.use_llm:
             llm_moments = self.llm_analyze_segments(segments, max_clips)
@@ -131,6 +149,7 @@ class MomentDetector:
         if llm_moments:
             return llm_moments
         
+        # Lógica de fallback se LLM falhar ou estiver desativada
         all_moments.sort(key=lambda x: x['timestamp'])
         grouped_moments = []
         for moment in all_moments:
@@ -142,11 +161,16 @@ class MomentDetector:
                     found = True
                     break
             if not found:
-                grouped_moments.append({'timestamp': moment['timestamp'], 'score': moment.get('confidence', 0.5), 'text': moment.get('text', ''), 'duration': 50})
+                grouped_moments.append({
+                    'timestamp': moment['timestamp'], 
+                    'score': moment.get('confidence', 0.5), 
+                    'text': moment.get('text', ''), 
+                    'duration': 50
+                })
         
         grouped_moments.sort(key=lambda x: x['score'], reverse=True)
         best_moments = grouped_moments[:max_clips]
         for m in best_moments:
             m['type'] = 'heuristic_selected'
-            m['reason'] = "Detectado por heurísticas"
+            m['reason'] = "Detectado por heurísticas de áudio e texto"
         return best_moments
