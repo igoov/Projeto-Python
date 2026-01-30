@@ -1,12 +1,13 @@
 -----------------------------
 Codigos para rodar: 
 
+cd ..
+
 cd Projeto-Python
 
 source .venv/bin/activate
 
-python podcast_clipper.py teste.mp4 --no-llm 
-
+python podcast_clipper.py teste.mp4 --max 3
 -----------------------------
 
 Caso nao tiver com o venv na pasta: 

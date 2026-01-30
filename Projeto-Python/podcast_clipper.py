@@ -1,260 +1,161 @@
-#!/usr/bin/env python3
-"""
-Podcast Clipper - Sistema automático de geração de clips virais
-Processa vídeos de podcast e gera cortes verticais com legendas para redes sociais
-"""
+import google.generativeai as genai
+from moviepy import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
+import cv2
+import numpy as np
 import os
-from dotenv import load_dotenv
-from modules.moment_detector import MomentDetector
-import sys
-import argparse
-from pathlib import Path
+import time
 import json
+import argparse
+import whisper
+from tqdm import tqdm
 
-load_dotenv()
-detector = MomentDetector(use_llm=True)
+# --- CONFIGURAÇÃO ---
+# Substitua pela sua chave real do Google AI Studio
+genai.configure(api_key="AIzaSyClzaj37XPckPwTYfHEG-rNJRjN-3clsHI")
 
-# Adicionar diretório modules ao path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'modules'))
+class VideoClipper:
+    def __init__(self):
+        # Carrega o detector de rostos do OpenCV
+        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-from audio_processor import AudioProcessor
-from moment_detector import MomentDetector
-from video_clipper import VideoClipper
-
-
-class PodcastClipper:
-    def __init__(self, whisper_model='base', use_llm=True):
-        """
-        Inicializa o sistema de clipagem de podcasts
-        
-        Args:
-            whisper_model: Tamanho do modelo Whisper (tiny, base, small, medium, large)
-            use_llm: Se True, usa LLM para análise semântica
-        """
-        print("=" * 60)
-        print("PODCAST CLIPPER - Gerador Automático de Clips Virais")
-        print("=" * 60)
-        
-        self.audio_processor = AudioProcessor(model_size=whisper_model)
-        self.moment_detector = MomentDetector(use_llm=use_llm)
-        self.video_clipper = VideoClipper()
-        
-        # Diretórios
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.temp_dir = os.path.join(self.base_dir, 'temp')
-        self.output_dir = os.path.join(self.base_dir, 'output')
-        
-        # Criar diretórios se não existirem
-        os.makedirs(self.temp_dir, exist_ok=True)
-        os.makedirs(self.output_dir, exist_ok=True)
-    
-    def process_video(self, video_path, max_clips=5, subtitle_style='word', 
-                     save_transcription=True):
-        """
-        Processa um vídeo completo e gera clips
-        
-        Args:
-            video_path: Caminho do vídeo de entrada
-            max_clips: Número máximo de clips a gerar
-            subtitle_style: 'word' (palavra por palavra) ou 'phrase' (frases completas)
-            save_transcription: Se True, salva a transcrição em JSON
+    def processar_com_ia(self, lista_palavras):
+        """Traduz do inglês ou revisa o português usando Gemini."""
+        if not lista_palavras:
+            return [], "MOMENTO ÉPICO! 🔥", "#podcast"
             
-        Returns:
-            Lista de caminhos dos clips gerados
+        texto_unido = " ".join(lista_palavras)
+        
+        prompt = f"""
+        Atue como um editor de vídeos viral. 
+        TAREFA:
+        1. Se o texto estiver em Inglês, TRADUZA para Português Brasileiro natural.
+        2. Se estiver em Português, revise a gramática.
+        3. Mantenha a ordem exata das palavras.
+        4. Gere um TÍTULO CLICKBAIT e 6 HASHTAGS.
+        
+        Texto: {texto_unido}
+        
+        Responda APENAS o JSON:
+        {{
+            "conteudo": ["palavra1", "palavra2", ...],
+            "titulo": "Seu Titulo Viral",
+            "tags": "#tag1 #tag2"
+        }}
         """
-        if not os.path.exists(video_path):
-            print(f"✗ Erro: Vídeo não encontrado: {video_path}")
-            return []
-        
-        video_name = Path(video_path).stem
-        print(f"\n{'='*60}")
-        print(f"Processando: {video_name}")
-        print(f"{'='*60}\n")
-        
-        # ETAPA 1: Extração de áudio e transcrição
-        print("ETAPA 1/4: Extração de áudio e transcrição")
-        print("-" * 60)
-        
         try:
-            transcription = self.audio_processor.process_video(video_path, self.temp_dir)
-            audio_path = os.path.join(self.temp_dir, f"{video_name}_audio.wav")
-            
-            print(f"✓ Transcrição concluída: {len(transcription['text'])} caracteres")
-            print(f"✓ Segmentos: {len(transcription['segments'])}")
-            
+            time.sleep(6)  # Blindagem API Free
+            response = self.model.generate_content(prompt)
+            res_text = response.text.replace('```json', '').replace('```', '').strip()
+            data = json.loads(res_text)
+            return data.get("conteudo", []), data.get("titulo", "MOMENTO ÉPICO! 🔥"), data.get("tags", "#viral")
         except Exception as e:
-            print(f"✗ Erro na transcrição: {e}")
-            return []
-        
-        # ETAPA 2: Detecção de momentos interessantes
-        print(f"\nETAPA 2/4: Detecção de momentos interessantes")
-        print("-" * 60)
-        
-        try:
-            moments = self.moment_detector.find_best_moments(
-                transcription,
-                audio_path,
-                max_clips=max_clips
-            )
-            
-            if not moments:
-                print("✗ Nenhum momento interessante detectado")
-                return []
-            
-            print(f"\n✓ {len(moments)} momentos selecionados:")
-            for i, moment in enumerate(moments, 1):
-                print(f"  {i}. [{moment['timestamp']:.1f}s] - {moment.get('reason', 'N/A')}")
-            
-        except Exception as e:
-            print(f"✗ Erro na detecção de momentos: {e}")
-            return []
-        
-        # ETAPA 3: Geração de clips
-        print(f"\nETAPA 3/4: Geração de clips verticais")
-        print("-" * 60)
-        
-        try:
-            clips = self.video_clipper.create_all_clips(
-                video_path,
-                transcription,
-                moments,
-                self.output_dir,
-                subtitle_style=subtitle_style
-            )
-            
-            print(f"\n✓ {len(clips)} clips gerados com sucesso")
-            
-        except Exception as e:
-            print(f"✗ Erro na geração de clips: {e}")
-            return []
-        
-        # ETAPA 4: Finalização
-        print(f"\nETAPA 4/4: Finalização")
-        print("-" * 60)
-        
-        # Salvar informações sobre os clips gerados
-        clips_info = {
-            'video_source': video_path,
-            'video_name': video_name,
-            'clips_generated': len(clips),
-            'subtitle_style': subtitle_style,
-            'moments': moments,
-            'clips': clips
-        }
-        
-        info_path = os.path.join(self.output_dir, f"{video_name}_clips_info.json")
-        with open(info_path, 'w', encoding='utf-8') as f:
-            json.dump(clips_info, f, ensure_ascii=False, indent=2)
-        
-        print(f"✓ Informações salvas: {info_path}")
-        
-        if save_transcription:
-            trans_path = os.path.join(self.output_dir, f"{video_name}_transcription.json")
-            with open(trans_path, 'w', encoding='utf-8') as f:
-                json.dump(transcription, f, ensure_ascii=False, indent=2)
-            print(f"✓ Transcrição salva: {trans_path}")
-        
-        # Resumo final
-        print(f"\n{'='*60}")
-        print("PROCESSAMENTO CONCLUÍDO!")
-        print(f"{'='*60}")
-        print(f"Clips gerados: {len(clips)}")
-        print(f"Diretório de saída: {self.output_dir}")
-        print(f"\nClips criados:")
-        for i, clip_path in enumerate(clips, 1):
-            file_size = os.path.getsize(clip_path) / (1024 * 1024)  # MB
-            print(f"  {i}. {os.path.basename(clip_path)} ({file_size:.1f} MB)")
-        print(f"{'='*60}\n")
-        
-        return clips
+            print(f"⚠️ Erro na IA: {e}")
+            return lista_palavras, "CONFIRA ISSO! 🔥", "#podcast #cortes"
 
+    def get_active_face_x(self, frame):
+        """Detecção de rosto para centralizar o corte vertical (9:16)."""
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+        # Filtra detecções muito baixas (mesa)
+        valid_faces = [x + w/2 for (x, y, w, h) in faces if y < (frame.shape[0] * 0.45)]
+        return valid_faces[0] if valid_faces else None
 
-def main():
-    parser = argparse.ArgumentParser(
-        description='Podcast Clipper - Gerador automático de clips virais para redes sociais',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Exemplos de uso:
-  
-  # Processar vídeo com configurações padrão (5 clips, legendas palavra por palavra)
-  python podcast_clipper.py meu_podcast.mp4
-  
-  # Gerar 3 clips com legendas em frases completas
-  python podcast_clipper.py meu_podcast.mp4 --max-clips 3 --subtitle-style phrase
-  
-  # Usar modelo Whisper maior para melhor precisão
-  python podcast_clipper.py meu_podcast.mp4 --whisper-model medium
-  
-  # Desabilitar análise LLM (mais rápido, mas menos preciso)
-  python podcast_clipper.py meu_podcast.mp4 --no-llm
-        """
-    )
-    
-    parser.add_argument(
-        'video',
-        help='Caminho do vídeo de podcast (mp4, mov, avi, etc.)'
-    )
-    
-    parser.add_argument(
-        '--max-clips',
-        type=int,
-        default=5,
-        help='Número máximo de clips a gerar (padrão: 5)'
-    )
-    
-    parser.add_argument(
-        '--subtitle-style',
-        choices=['word', 'phrase'],
-        default='word',
-        help='Estilo das legendas: "word" (palavra por palavra, estilo viral) ou "phrase" (frases completas) (padrão: word)'
-    )
-    
-    parser.add_argument(
-        '--whisper-model',
-        choices=['tiny', 'base', 'small', 'medium', 'large'],
-        default='base',
-        help='Tamanho do modelo Whisper (padrão: base). Modelos maiores são mais precisos mas mais lentos'
-    )
-    
-    parser.add_argument(
-        '--no-llm',
-        action='store_true',
-        help='Desabilitar análise com LLM (usa apenas heurísticas)'
-    )
-    
-    parser.add_argument(
-        '--no-save-transcription',
-        action='store_true',
-        help='Não salvar arquivo de transcrição'
-    )
-    
+    def create_subtitle(self, word, start, duration):
+        """Cria legendas amarelas que quebram linha (evita cortes)."""
+        return TextClip(
+            text=word.upper(), 
+            font_size=70, 
+            color='yellow', 
+            stroke_color='black', 
+            stroke_width=2, 
+            method='caption', # Garante que o texto não saia da tela
+            size=(850, None), 
+            text_align='center',
+            font='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+        ).with_position(('center', 1400)).with_start(start).with_duration(duration)
+
+    def create_all_clips(self, video_path, transcription, moments, output_dir):
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        video = VideoFileClip(video_path)
+        
+        for i, m in enumerate(moments, 1):
+            is_longo = (i % 4 == 0) 
+            duracao_alvo = 65 if is_longo else 40
+            pasta_nome = f"corte_{i:02d}_{'LONGO' if is_longo else 'CURTO'}"
+            pasta_corte = os.path.join(output_dir, pasta_nome)
+            os.makedirs(pasta_corte, exist_ok=True)
+            
+            print(f"\n🎬 PROCESSANDO CORTE {i}/{len(moments)}")
+            
+            start_t = max(0, m['timestamp'] - 2)
+            end_t = min(start_t + duracao_alvo, video.duration)
+            sub = video.subclipped(start_t, end_t)
+            
+            # --- CÂMERA DINÂMICA ---
+            segments = []
+            last_x = sub.w / 2
+            for t in np.arange(0, sub.duration, 1.0):
+                frame = sub.get_frame(t)
+                new_x = self.get_active_face_x(frame)
+                if new_x: last_x = new_x
+                
+                target_w = int(sub.h * (9/16))
+                x1 = int(max(0, min(last_x - target_w/2, sub.w - target_w)))
+                seg = sub.subclipped(t, min(t + 1.0, sub.duration)).cropped(x1=x1, x2=x1+target_w, y1=0, y2=sub.h)
+                segments.append(seg.resized(width=1080, height=1920))
+
+            sub_v = concatenate_videoclips(segments)
+            
+            # --- IA E TRADUÇÃO ---
+            palavras_trecho = []
+            for segment in transcription['segments']:
+                for w_data in segment.get('words', []):
+                    if w_data['start'] >= start_t and w_data['end'] <= end_t:
+                        palavras_trecho.append(w_data)
+
+            lista_txt = [w['word'].strip() for w in palavras_trecho]
+            texto_br, titulo_ia, tags_ia = self.processar_com_ia(lista_txt)
+            
+            if len(texto_br) != len(palavras_trecho): texto_br = lista_txt
+
+            subs_clips = [self.create_subtitle(texto_br[idx], w['start']-start_t, w['end']-w['start']) 
+                          for idx, w in enumerate(palavras_trecho) if (w['end']-w['start']) > 0]
+            
+            # --- RENDERIZAÇÃO ---
+            final = CompositeVideoClip([sub_v] + subs_clips)
+            final.write_videofile(os.path.join(pasta_corte, f"video_{i:02d}.mp4"), codec='libx264', audio_codec='aac', threads=4)
+            
+            with open(os.path.join(pasta_corte, "postagem.txt"), "w") as f:
+                f.write(f"TITULO: {titulo_ia}\nTAGS: {tags_ia}")
+
+        video.close()
+
+# --- BLOCO PRINCIPAL (ENTRY POINT) ---
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("video", help="Caminho do vídeo")
+    parser.add_argument("--max", type=int, default=11)
+    parser.add_argument("--model", default="small")
     args = parser.parse_args()
-    
-    # Validar arquivo de entrada
-    if not os.path.exists(args.video):
-        print(f"✗ Erro: Arquivo não encontrado: {args.video}")
-        sys.exit(1)
-    
-    # Inicializar sistema
-    clipper = PodcastClipper(
-        whisper_model=args.whisper_model,
-        use_llm=not args.no_llm
-    )
-    
-    # Processar vídeo
-    clips = clipper.process_video(
-        args.video,
-        max_clips=args.max_clips,
-        subtitle_style=args.subtitle_style,
-        save_transcription=not args.no_save_transcription
-    )
-    
-    # Status de saída
-    if clips:
-        sys.exit(0)
-    else:
-        sys.exit(1)
 
-
-if __name__ == '__main__':
-    main()
+    if os.path.exists(args.video):
+        print(f"🚀 Iniciando Processamento de 15 min: {args.video}")
+        clipper = VideoClipper()
+        
+        print(f"🎙️ Carregando Whisper... (Modo Verbose Ativado)")
+        model = whisper.load_model(args.model)
+        # O verbose=True faz você ver o texto aparecendo no terminal!
+        result = model.transcribe(args.video, word_timestamps=True, verbose=True)
+        
+        v_meta = VideoFileClip(args.video)
+        total = v_meta.duration
+        v_meta.close()
+        
+        intervalo = total / (args.max + 1)
+        pontos = [{"timestamp": i * intervalo} for i in range(1, args.max + 1)]
+        
+        clipper.create_all_clips(args.video, result, pontos, "output")
+        print("\n✅ TUDO PRONTO!")

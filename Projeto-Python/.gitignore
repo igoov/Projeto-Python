@@ -1,0 +1,6 @@
+touch .gitignore
+echo ".venv/" >> .gitignore
+echo "__pycache__/" >> .gitignore
+echo "output/" >> .gitignore
+echo "*.mp4" >> .gitignore
+echo ".env" >> .gitignore
