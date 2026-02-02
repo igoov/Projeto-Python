@@ -1,56 +1,72 @@
-import google.generativeai as genai
-from moviepy import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
-import cv2
-import numpy as np
 import os
 import time
 import json
 import argparse
+import cv2
+import numpy as np
 import whisper
+from groq import Groq
+from moviepy import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
 from tqdm import tqdm
 
 # --- CONFIGURAÇÃO ---
-# Substitua pela sua chave real do Google AI Studio
-genai.configure(api_key="AIzaSyClzaj37XPckPwTYfHEG-rNJRjN-3clsHI")
+# Substitua pela sua chave real do Groq Cloud
+GROQ_API_KEY = ","
 
 class VideoClipper:
     def __init__(self):
         # Carrega o detector de rostos do OpenCV
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # Inicializa o cliente Groq
+        self.client = Groq(api_key=GROQ_API_KEY)
 
     def processar_com_ia(self, lista_palavras):
-        """Traduz do inglês ou revisa o português usando Gemini."""
+        """Traduz do inglês ou revisa o português usando Groq (Llama 3)."""
         if not lista_palavras:
             return [], "MOMENTO ÉPICO! 🔥", "#podcast"
             
         texto_unido = " ".join(lista_palavras)
         
         prompt = f"""
-        Atue como um editor de vídeos viral. 
+        Atue como um editor de vídeos viral e tradutor especializado. 
         TAREFA:
-        1. Se o texto estiver em Inglês, TRADUZA para Português Brasileiro natural.
-        2. Se estiver em Português, revise a gramática.
-        3. Mantenha a ordem exata das palavras.
-        4. Gere um TÍTULO CLICKBAIT e 6 HASHTAGS.
+        1. Se o texto estiver em Inglês, TRADUZA para Português Brasileiro natural e coloquial.
+        2. Se estiver em Português, revise a gramática e torne-o mais impactante.
+        3. IMPORTANTE: Tente manter o mesmo número de elementos na lista 'conteudo' para manter a sincronia com o vídeo original.
+        4. Gere um TÍTULO CLICKBAIT e 6 HASHTAGS virais.
         
-        Texto: {texto_unido}
+        Texto Original: {texto_unido}
         
-        Responda APENAS o JSON:
+        Responda ESTRITAMENTE no formato JSON abaixo:
         {{
-            "conteudo": ["palavra1", "palavra2", ...],
-            "titulo": "Seu Titulo Viral",
-            "tags": "#tag1 #tag2"
+            "conteudo": ["palavra1", "palavra2", "palavra3", ...],
+            "titulo": "Seu Titulo Viral Aqui",
+            "tags": "#tag1 #tag2 #tag3 #tag4 #tag5 #tag6"
         }}
         """
         try:
-            time.sleep(6)  # Blindagem API Free
-            response = self.model.generate_content(prompt)
-            res_text = response.text.replace('```json', '').replace('```', '').strip()
+            # Groq é ultra rápido, o sleep de 0.5s é apenas para segurança de rate limit
+            time.sleep(0.5) 
+            
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": "Você é um assistente que traduz vídeos e responde apenas em JSON puro."},
+                    {"role": "user", "content": prompt}
+                ],
+                model="llama-3.3-70b-versatile",
+                response_format={"type": "json_object"}
+            )
+            
+            res_text = chat_completion.choices[0].message.content
             data = json.loads(res_text)
-            return data.get("conteudo", []), data.get("titulo", "MOMENTO ÉPICO! 🔥"), data.get("tags", "#viral")
+            
+            conteudo = data.get("conteudo", [])
+            titulo = data.get("titulo", "MOMENTO ÉPICO! 🔥")
+            tags = data.get("tags", "#viral #cortes")
+            
+            return conteudo, titulo, tags
         except Exception as e:
-            print(f"⚠️ Erro na IA: {e}")
+            print(f"⚠️ Erro na IA (Groq): {e}")
             return lista_palavras, "CONFIRA ISSO! 🔥", "#podcast #cortes"
 
     def get_active_face_x(self, frame):
@@ -62,18 +78,29 @@ class VideoClipper:
         return valid_faces[0] if valid_faces else None
 
     def create_subtitle(self, word, start, duration):
-        """Cria legendas amarelas que quebram linha (evita cortes)."""
-        return TextClip(
-            text=word.upper(), 
-            font_size=70, 
+        """
+        Cria legendas inteligentes:
+        1. Usa 'label' para precisão máxima (evita cortes no topo/base).
+        2. Adiciona espaços laterais para garantir que o contorno não suma.
+        3. Mantém a margem de segurança.
+        """
+        txt_clip = TextClip(
+            text=f" {word.upper()} ", # Espaços extras ajudam na renderização
+            font_size=75, 
             color='yellow', 
             stroke_color='black', 
-            stroke_width=2, 
-            method='caption', # Garante que o texto não saia da tela
-            size=(850, None), 
+            stroke_width=3, 
+            method='label', # MUDADO: 'label' é melhor que 'caption' para evitar cortes
+            font='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
             text_align='center',
-            font='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-        ).with_position(('center', 1400)).with_start(start).with_duration(duration)
+            margin=(25, 25) # Margem aumentada para garantir o respiro
+        )
+
+        # Se a palavra for muito longa para a tela vertical, redimensiona
+        if txt_clip.w > 950:
+            txt_clip = txt_clip.resized(width=950)
+
+        return txt_clip.with_position(('center', 1450)).with_start(start).with_duration(duration)
 
     def create_all_clips(self, video_path, transcription, moments, output_dir):
         if not os.path.exists(output_dir):
@@ -81,7 +108,7 @@ class VideoClipper:
 
         video = VideoFileClip(video_path)
         
-        for i, m in enumerate(moments, 1):
+        for i, m in enumerate(tqdm(moments, desc="Cortando momentos"), 1):
             is_longo = (i % 4 == 0) 
             duracao_alvo = 65 if is_longo else 40
             pasta_nome = f"corte_{i:02d}_{'LONGO' if is_longo else 'CURTO'}"
@@ -109,7 +136,7 @@ class VideoClipper:
 
             sub_v = concatenate_videoclips(segments)
             
-            # --- IA E TRADUÇÃO ---
+            # --- IA E TRADUÇÃO VIA GROQ ---
             palavras_trecho = []
             for segment in transcription['segments']:
                 for w_data in segment.get('words', []):
@@ -117,23 +144,39 @@ class VideoClipper:
                         palavras_trecho.append(w_data)
 
             lista_txt = [w['word'].strip() for w in palavras_trecho]
-            texto_br, titulo_ia, tags_ia = self.processar_com_ia(lista_txt)
             
-            if len(texto_br) != len(palavras_trecho): texto_br = lista_txt
+            # Chama o Groq para traduzir e gerar metadados
+            texto_traduzido, titulo_ia, tags_ia = self.processar_com_ia(lista_txt)
+            
+            # Fallback caso a tradução mude o número de palavras drasticamente
+            if len(texto_traduzido) != len(palavras_trecho):
+                print(f"⚠️ Aviso: A tradução gerou {len(texto_traduzido)} palavras para {len(palavras_trecho)} originais. Ajustando...")
+                if abs(len(texto_traduzido) - len(palavras_trecho)) > 5:
+                    texto_final = lista_txt
+                else:
+                    texto_final = texto_traduzido
+            else:
+                texto_final = texto_traduzido
 
-            subs_clips = [self.create_subtitle(texto_br[idx], w['start']-start_t, w['end']-w['start']) 
-                          for idx, w in enumerate(palavras_trecho) if (w['end']-w['start']) > 0]
+            subs_clips = []
+            for idx, w in enumerate(palavras_trecho):
+                if idx >= len(texto_final): break
+                
+                s = w['start'] - start_t
+                d = w['end'] - w['start']
+                if d > 0:
+                    subs_clips.append(self.create_subtitle(texto_final[idx], s, d))
             
             # --- RENDERIZAÇÃO ---
             final = CompositeVideoClip([sub_v] + subs_clips)
             final.write_videofile(os.path.join(pasta_corte, f"video_{i:02d}.mp4"), codec='libx264', audio_codec='aac', threads=4)
             
-            with open(os.path.join(pasta_corte, "postagem.txt"), "w") as f:
+            with open(os.path.join(pasta_corte, "postagem.txt"), "w", encoding="utf-8") as f:
                 f.write(f"TITULO: {titulo_ia}\nTAGS: {tags_ia}")
 
         video.close()
 
-# --- BLOCO PRINCIPAL (ENTRY POINT) ---
+# --- BLOCO PRINCIPAL ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("video", help="Caminho do vídeo")
@@ -142,13 +185,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if os.path.exists(args.video):
-        print(f"🚀 Iniciando Processamento de 15 min: {args.video}")
+        print(f"🚀 Iniciando Processamento: {args.video}")
         clipper = VideoClipper()
         
-        print(f"🎙️ Carregando Whisper... (Modo Verbose Ativado)")
-        model = whisper.load_model(args.model)
-        # O verbose=True faz você ver o texto aparecendo no terminal!
-        result = model.transcribe(args.video, word_timestamps=True, verbose=True)
+        print(f"🎙️ Carregando Whisper e Transcrevendo...")
+        model_whisper = whisper.load_model(args.model)
+        result = model_whisper.transcribe(args.video, word_timestamps=True, verbose=True)
         
         v_meta = VideoFileClip(args.video)
         total = v_meta.duration
