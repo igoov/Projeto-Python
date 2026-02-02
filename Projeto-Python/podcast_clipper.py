@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 # --- CONFIGURAÇÃO ---
 # Substitua pela sua chave real do Groq Cloud
-GROQ_API_KEY = "."
+GROQ_API_KEY = ","
 
 class VideoClipper:
     def __init__(self):
