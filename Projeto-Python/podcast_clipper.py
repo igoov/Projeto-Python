@@ -19,47 +19,46 @@ class VideoClipper:
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         # Inicializa o cliente Groq
         self.client = Groq(api_key=GROQ_API_KEY)
-        # Parâmetros de suavização e inércia
-        self.smoothing_factor = 0.2  # Fator de suavização (0.0 a 1.0)
-        self.inertia_threshold = 50   # Zona de inércia em pixels
+        
+        # --- AJUSTES PARA SUAVIZAÇÃO EXTREMA ---
+        self.smoothing_factor = 0.05  
+        self.inertia_threshold = 80   
 
     def processar_com_ia(self, lista_palavras):
-        """Traduz do inglês ou revisa o português usando Groq (Llama 3)."""
+        """Força a tradução para português usando Groq (Llama 3)."""
         if not lista_palavras:
             return [], "MOMENTO ÉPICO! 🔥", "#podcast"
             
         texto_unido = " ".join(lista_palavras)
         
         prompt = f"""
-        Atue como um editor de vídeos viral e tradutor especializado. 
-        TAREFA:
-        1. Se o texto estiver em Inglês, TRADUZA para Português Brasileiro natural e coloquial.
-        2. Se estiver em Português, revise a gramática e torne-o mais impactante.
-        3. IMPORTANTE: Tente manter o mesmo número de elementos na lista 'conteudo' para manter a sincronia com o vídeo original.
-        4. Gere um TÍTULO CLICKBAIT e 6 HASHTAGS virais.
+        VOCÊ É UM TRADUTOR OBRIGATÓRIO.
         
+        TAREFA:
+        1. TRADUZA o texto abaixo para PORTUGUÊS BRASILEIRO.
+        2. É PROIBIDO manter o texto em inglês.
+        3. Mantenha EXATAMENTE {len(lista_palavras)} palavras na lista 'conteudo'.
+        4. Se não conseguir traduzir perfeitamente, adapte, mas ENTREGUE EM PORTUGUÊS.
+
         Texto Original: {texto_unido}
         
-        Responda ESTRITAMENTE no formato JSON abaixo:
+        Responda APENAS em JSON:
         {{
-            "conteudo": ["palavra1", "palavra2", "palavra3", ...],
-            "titulo": "Seu Titulo Viral Aqui",
-            "tags": "#tag1 #tag2 #tag3 #tag4 #tag5 #tag6"
+            "conteudo": ["palavra1", "palavra2", ...],
+            "titulo": "Título Viral em Português",
+            "tags": "#viral #cortes"
         }}
         """
         try:
-            # Groq é ultra rápido, o sleep de 0.5s é apenas para segurança de rate limit
             time.sleep(0.5) 
-            
             chat_completion = self.client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": "Você é um assistente que traduz vídeos e responde apenas em JSON puro."},
+                    {"role": "system", "content": "Você é um assistente de tradução que só fala Português Brasileiro e responde em JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 model="llama-3.3-70b-versatile",
                 response_format={"type": "json_object"}
             )
-            
             res_text = chat_completion.choices[0].message.content
             data = json.loads(res_text)
             
@@ -67,50 +66,40 @@ class VideoClipper:
             titulo = data.get("titulo", "MOMENTO ÉPICO! 🔥")
             tags = data.get("tags", "#viral #cortes")
             
+            while len(conteudo) < len(lista_palavras):
+                conteudo.append("...")
+                
             return conteudo, titulo, tags
         except Exception as e:
             print(f"⚠️ Erro na IA (Groq): {e}")
-            return lista_palavras, "CONFIRA ISSO! 🔥", "#podcast #cortes"
+            return ["ERRO"], "ERRO", "#erro"
 
     def get_active_face_x(self, frame):
         """Detecção de rosto para centralizar o corte vertical (9:16)."""
         gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
         
-        # FOCO NO LOCUTOR ATIVO: Prioriza o rosto com maior área no frame
         if len(faces) > 0:
-            # Ordena por área (w * h) descendente e pega o maior
             best_face = max(faces, key=lambda f: f[2] * f[3])
             x, y, w, h = best_face
-            # Filtra detecções muito baixas (mesa) se necessário, mas mantém o foco no maior
             if y < (frame.shape[0] * 0.45):
                 return x + w/2
-        
         return None
 
     def create_subtitle(self, word, start, duration):
-        """
-        Cria legendas inteligentes:
-        1. Usa 'label' para precisão máxima (evita cortes no topo/base).
-        2. Adiciona espaços laterais para garantir que o contorno não suma.
-        3. Mantém a margem de segurança.
-        """
         txt_clip = TextClip(
-            text=f" {word.upper()} ", # Espaços extras ajudam na renderização
+            text=f" {word.upper()} ",
             font_size=75, 
             color='yellow', 
             stroke_color='black', 
             stroke_width=3, 
-            method='label', # MUDADO: 'label' é melhor que 'caption' para evitar cortes
+            method='label',
             font='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
             text_align='center',
-            margin=(25, 25) # Margem aumentada para garantir o respiro
+            margin=(25, 25)
         )
-
-        # Se a palavra for muito longa para a tela vertical, redimensiona
         if txt_clip.w > 950:
             txt_clip = txt_clip.resized(width=950)
-
         return txt_clip.with_position(('center', 1450)).with_start(start).with_duration(duration)
 
     def create_all_clips(self, video_path, transcription, moments, output_dir):
@@ -126,38 +115,33 @@ class VideoClipper:
             pasta_corte = os.path.join(output_dir, pasta_nome)
             os.makedirs(pasta_corte, exist_ok=True)
             
-            print(f"\n🎬 PROCESSANDO CORTE {i}/{len(moments)}")
-            
             start_t = max(0, m['timestamp'] - 2)
             end_t = min(start_t + duracao_alvo, video.duration)
             sub = video.subclipped(start_t, end_t)
             
-            # --- CÂMERA DINÂMICA ---
+            # --- CÂMERA ULTRA-SUAVE COM BARRA DE PROGRESSO ---
             segments = []
             current_x = sub.w / 2
+            step = 0.5 
             
-            # AMOSTRAGEM DE ALTA FREQUÊNCIA: Analisa a cada 0.5s em vez de 1.0s
-            step = 0.5
-            for t in np.arange(0, sub.duration, step):
+            time_steps = np.arange(0, sub.duration, step)
+            for t in tqdm(time_steps, desc=f"  ↳ Câmera dinâmica (Corte {i})", leave=False):
                 frame = sub.get_frame(t)
                 new_x = self.get_active_face_x(frame)
                 
                 if new_x:
-                    # ZONA DE INÉRCIA: Só move se a diferença for significativa
                     if abs(new_x - current_x) > self.inertia_threshold:
-                        # SUAVIZAÇÃO DE MOVIMENTO (Smoothing): Desliza suavemente
                         current_x = (current_x * (1 - self.smoothing_factor)) + (new_x * self.smoothing_factor)
                 
                 target_w = int(sub.h * (9/16))
                 x1 = int(max(0, min(current_x - target_w/2, sub.w - target_w)))
                 
-                # Cria o segmento com a posição atualizada
                 seg = sub.subclipped(t, min(t + step, sub.duration)).cropped(x1=x1, x2=x1+target_w, y1=0, y2=sub.h)
                 segments.append(seg.resized(width=1080, height=1920))
 
             sub_v = concatenate_videoclips(segments)
             
-            # --- IA E TRADUÇÃO VIA GROQ ---
+            # --- TRANSCRIÇÃO E TRADUÇÃO FORÇADA ---
             palavras_trecho = []
             for segment in transcription['segments']:
                 for w_data in segment.get('words', []):
@@ -165,30 +149,15 @@ class VideoClipper:
                         palavras_trecho.append(w_data)
 
             lista_txt = [w['word'].strip() for w in palavras_trecho]
-            
-            # Chama o Groq para traduzir e gerar metadados
-            texto_traduzido, titulo_ia, tags_ia = self.processar_com_ia(lista_txt)
-            
-            # Fallback caso a tradução mude o número de palavras drasticamente
-            if len(texto_traduzido) != len(palavras_trecho):
-                print(f"⚠️ Aviso: A tradução gerou {len(texto_traduzido)} palavras para {len(palavras_trecho)} originais. Ajustando...")
-                if abs(len(texto_traduzido) - len(palavras_trecho)) > 5:
-                    texto_final = lista_txt
-                else:
-                    texto_final = texto_traduzido
-            else:
-                texto_final = texto_traduzido
+            texto_final, titulo_ia, tags_ia = self.processar_com_ia(lista_txt)
 
             subs_clips = []
             for idx, w in enumerate(palavras_trecho):
                 if idx >= len(texto_final): break
-                
-                s = w['start'] - start_t
-                d = w['end'] - w['start']
-                if d > 0:
+                s, d = w['start'] - start_t, w['end'] - w['start']
+                if d > 0: 
                     subs_clips.append(self.create_subtitle(texto_final[idx], s, d))
             
-            # --- RENDERIZAÇÃO ---
             final = CompositeVideoClip([sub_v] + subs_clips)
             final.write_videofile(os.path.join(pasta_corte, f"video_{i:02d}.mp4"), codec='libx264', audio_codec='aac', threads=4)
             
@@ -197,7 +166,6 @@ class VideoClipper:
 
         video.close()
 
-# --- BLOCO PRINCIPAL ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("video", help="Caminho do vídeo")
@@ -211,6 +179,8 @@ if __name__ == "__main__":
         
         print(f"🎙️ Carregando Whisper e Transcrevendo...")
         model_whisper = whisper.load_model(args.model)
+        
+        # RESTAURADO: verbose=True faz os blocos de texto aparecerem na tela durante a transcrição
         result = model_whisper.transcribe(args.video, word_timestamps=True, verbose=True)
         
         v_meta = VideoFileClip(args.video)
