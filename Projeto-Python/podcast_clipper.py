@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 # --- CONFIGURAÇÃO ---
 # Substitua pela sua chave real do Groq Cloud
-GROQ_API_KEY = ","
+GROQ_API_KEY = "."
 
 class VideoClipper:
     def __init__(self):
@@ -19,6 +19,9 @@ class VideoClipper:
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         # Inicializa o cliente Groq
         self.client = Groq(api_key=GROQ_API_KEY)
+        # Parâmetros de suavização e inércia
+        self.smoothing_factor = 0.2  # Fator de suavização (0.0 a 1.0)
+        self.inertia_threshold = 50   # Zona de inércia em pixels
 
     def processar_com_ia(self, lista_palavras):
         """Traduz do inglês ou revisa o português usando Groq (Llama 3)."""
@@ -73,9 +76,17 @@ class VideoClipper:
         """Detecção de rosto para centralizar o corte vertical (9:16)."""
         gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
-        # Filtra detecções muito baixas (mesa)
-        valid_faces = [x + w/2 for (x, y, w, h) in faces if y < (frame.shape[0] * 0.45)]
-        return valid_faces[0] if valid_faces else None
+        
+        # FOCO NO LOCUTOR ATIVO: Prioriza o rosto com maior área no frame
+        if len(faces) > 0:
+            # Ordena por área (w * h) descendente e pega o maior
+            best_face = max(faces, key=lambda f: f[2] * f[3])
+            x, y, w, h = best_face
+            # Filtra detecções muito baixas (mesa) se necessário, mas mantém o foco no maior
+            if y < (frame.shape[0] * 0.45):
+                return x + w/2
+        
+        return None
 
     def create_subtitle(self, word, start, duration):
         """
@@ -123,15 +134,25 @@ class VideoClipper:
             
             # --- CÂMERA DINÂMICA ---
             segments = []
-            last_x = sub.w / 2
-            for t in np.arange(0, sub.duration, 1.0):
+            current_x = sub.w / 2
+            
+            # AMOSTRAGEM DE ALTA FREQUÊNCIA: Analisa a cada 0.5s em vez de 1.0s
+            step = 0.5
+            for t in np.arange(0, sub.duration, step):
                 frame = sub.get_frame(t)
                 new_x = self.get_active_face_x(frame)
-                if new_x: last_x = new_x
+                
+                if new_x:
+                    # ZONA DE INÉRCIA: Só move se a diferença for significativa
+                    if abs(new_x - current_x) > self.inertia_threshold:
+                        # SUAVIZAÇÃO DE MOVIMENTO (Smoothing): Desliza suavemente
+                        current_x = (current_x * (1 - self.smoothing_factor)) + (new_x * self.smoothing_factor)
                 
                 target_w = int(sub.h * (9/16))
-                x1 = int(max(0, min(last_x - target_w/2, sub.w - target_w)))
-                seg = sub.subclipped(t, min(t + 1.0, sub.duration)).cropped(x1=x1, x2=x1+target_w, y1=0, y2=sub.h)
+                x1 = int(max(0, min(current_x - target_w/2, sub.w - target_w)))
+                
+                # Cria o segmento com a posição atualizada
+                seg = sub.subclipped(t, min(t + step, sub.duration)).cropped(x1=x1, x2=x1+target_w, y1=0, y2=sub.h)
                 segments.append(seg.resized(width=1080, height=1920))
 
             sub_v = concatenate_videoclips(segments)
